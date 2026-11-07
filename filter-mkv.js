@@ -159,30 +159,47 @@ const LATAM_TAG = /^(?:es|spa) (?:419|mx|ar|bo|br|cl|co|cr|cu|do|ec|gt|hn|ni|pa|
 
 const LATAM_NAME = [
   /\blatin america(?:n)?\b/,
+  /\blatin\b/,
   /\blatinoamerica(?:no|na)?s?\b/,
   /\blatino\b/,
   /\blatam\b/,
+  /\bspanish lat\b/,
+  /\bspanish latin\b/,
+  /\b(?:^|[\s[(|_])la(?:$|[\s\])|_])/,
+  /\b(?:^|[\s[(|_])lat(?:$|[\s\])|_])/,
+
   /\bsouth american spanish\b/,
   /\bhispanoamerica(?:no|na)?s?\b/,
+
   /\b(?:mexican|mexico|argentinian|argentina|venezuelan|venezuela)\b/,
   /\b(?:colombian|colombia|chilean|chile|peruvian|peru)\b/,
-  /\b(?:bolivian|bolivia|ecuadorian|ecuador|uruguayan|uruguay|paraguayan|paraguay)\b/,
-  /\b(?:central american spanish|caribbean spanish)\b/,
+  /\b(?:bolivian|bolivia|ecuadorian|ecuador|uruguayan|uruguay)\b/,
+  /\b(?:paraguayan|paraguay)\b/,
 ];
 
 const CASTILIAN_NAME = [
   /\bcastilian\b/,
   /\bcastellano\b/,
+  /\beuropean\b/,
   /\beuropean spanish\b/,
   /\bspanish europe\b/,
   /\bspanish spain\b/,
   /\bspain spanish\b/,
+
   /\bespanol espana\b/,
   /\bespanol de espana\b/,
   /\bespana\b/,
+
   /\bspanish esp\b/,
-  /\besp\b/,
+  /\bspanish es\b/,
+
+  // Standalone ES/ESP labels.
+  /(?:^|[\s[(|])esp(?:$|[\s\])|])/,
+  /(?:^|[\s[(|])es(?:$|[\s\])|])/,
 ];
+
+const FORCED_PATTERN = /\b(forced|forzado|forzados|forzada|forzadas)\b/i;
+const KARAOKE_PATTERN = /\bkaraoke(?:s)?\b/i;
 
 function getSpanishInfo(track) {
   const p = props(track);
@@ -378,51 +395,107 @@ function getDisplayLanguage(track) {
 }
 
 function getSubtitleSuffix(track) {
-  const name = String(track.properties?.track_name || track.name || "");
+  const p = track.properties || {};
+  const originalName = String(p.track_name || '');
 
+  const name = normalize(originalName);
   const suffixes = [];
 
   const isForced =
-    track.properties?.forced_track === true ||
-    /\b(forced|forzado)\b/i.test(name);
-
-  const isCC =
-    /\b(cc|closed[\s_-]*captions?)\b/i.test(name);
+    Boolean(p.forced_track) ||
+    /\b(forced|forzado|forzados|forzada|forzadas)\b/.test(name);
 
   const isKaraoke =
-    /\bkaraoke\b/i.test(name);
-
-  let isSigns =
-    /\bsigns\b/i.test(name);
+    /\bkaraoke(?:s)?\b/.test(name);
 
   const isSignsAndSongs =
-    /\b(signs?\s*(?:and|&)\s*songs?|carteles?\s*(?:y|&)\s*canciones)\b/i.test(name);
+    /\b(signs?\s*(?:and|&|\/)\s*songs?)\b/.test(name) ||
+    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name);
+
+  const isSignsOnly =
+    !isSignsAndSongs && (
+      /\b(?:signs?|carteles?)\b/.test(name) ||
+      /\btitles?\s*(?:and|&|\/)\s*signs?\b/.test(name)
+    );
+
+  const isCC =
+    /\b(?:cc|closed captions?)\b/.test(name);
+
+  const isSDH =
+    /\b(?:sdh|subtitles?\s+for\s+(?:the\s+)?deaf|hard\s+of\s+hearing)\b/.test(name);
+
+  const isDubTitle =
+    /\b(?:dub|dubtitle?)\b/.test(name);
+
+  // Keep a predictable order in renamed tracks.
+  if (isKaraoke) suffixes.push('Karaoke');
 
   if (isSignsAndSongs) {
-    isSigns = false;
+    suffixes.push('Carteles y Canciones');
+  } else if (isSignsOnly) {
+    suffixes.push('Carteles');
   }
 
-  if (isKaraoke) suffixes.push("Karaoke");
-  if (isSigns) suffixes.push("Carteles");
-  if (isSignsAndSongs) suffixes.push("Carteles y Canciones");
-  if (isCC) suffixes.push("CC");
-  if (isForced) suffixes.push("Forzado");
+  if (isCC) suffixes.push('CC');
+  if (isSDH) suffixes.push('SDH');
+  if (isForced) suffixes.push('Forzado');
+  if (isDubTitle) suffixes.push('Dub');
 
-  return suffixes.length ? ` ${suffixes.join(" ")}` : "";
+  return suffixes;
+}
+
+function getAccessibilitySuffix(trackName) {
+  if (/\b(?:cc|closed captions?)\b/i.test(trackName)) {
+    return 'CC';
+  }
+
+  if (/\b(?:sdh|subtitles? for (?:the )?deaf|hard of hearing)\b/i.test(trackName)) {
+    return 'SDH';
+  }
+
+  return null;
+}
+
+function getSignsSuffix(trackName) {
+  const name = normalize(trackName);
+
+  const signsAndSongs =
+    /\b(signs?\s*(?:and|&|\/)\s*songs?)\b/.test(name) ||
+    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name);
+
+  if (signsAndSongs) {
+    return 'Carteles y Canciones';
+  }
+
+  const signsOnly =
+    /\b(signs?|titles?\s*(?:and|&|\/)\s*signs?)\b/.test(name) ||
+    /\bcarteles?\b/.test(name);
+
+  if (signsOnly) {
+    return 'Carteles';
+  }
+
+  return null;
 }
 
 function getDisplayTrackName(track) {
   const languageName = getDisplayLanguage(track);
 
-  // Do not rename unknown languages.
-  if (!languageName) return null;
+  if (!languageName) {
+    return null;
+  }
 
-  const p = props(track);
-  const name = getName(track);
-  const suffix = getSubtitleSuffix(track);
-  const newName = `${languageName}${suffix}`;
+  // Only subtitles receive these descriptive suffixes.
+  if (track.type === 'subtitles') {
+    const suffixes = getSubtitleSuffix(track);
 
-  return newName;
+    return suffixes.length
+      ? `${languageName} ${suffixes.join(' ')}`
+      : languageName;
+  }
+
+  // Audio tracks retain only the language name.
+  return languageName;
 }
 
 function getTrackLabel(track) {
