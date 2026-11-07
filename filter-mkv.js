@@ -283,6 +283,24 @@ function isSpanishSubtitle(track, variant) {
   return false;
 }
 
+function isUndefinedTrack(track) {
+  const p = track.properties || {};
+
+  const language = String(p.language || '').trim().toLowerCase();
+  const languageIetf = String(p.language_ietf || '').trim().toLowerCase();
+  const name = String(p.track_name || '').trim();
+
+  // Treat tracks as undefined when mkvmerge provides no meaningful
+  // language information and no track name that could identify them.
+  const undefinedLanguage =
+    !language ||
+    language === 'und' ||
+    !languageIetf ||
+    languageIetf === 'und';
+
+  return undefinedLanguage && !name;
+}
+
 function chooseSpanishSubtitleGroup(subtitles) {
   const spanishTracks = subtitles.filter(track => {
     return getSpanishInfo(track).isSpanish;
@@ -668,7 +686,7 @@ function main() {
 
   const keptAudio = uniqueTracks(
     audio.filter((t) =>
-      isJapanese(t) || isSpanishAudio(t) || isEnglish(t)
+      isJapanese(t) || isSpanishAudio(t) || isEnglish(t) || isUndefinedTrack(t)
     )
   );
 
@@ -684,7 +702,19 @@ function main() {
 
   const keptVideoIds = new Set(keptVideo.map((t) => t.id));
   const keptAudioIds = new Set(keptAudio.map((t) => t.id));
-  const keptSubtitleIds = new Set(keptSubtitles.map((t) => t.id));
+  const undefinedSubtitles = keptSubtitles.filter(isUndefinedTrack);
+
+  // Avoid duplicates if the selection logic already included one.
+  const keptSubtitleIds = new Set(
+    keptSubtitles.map(t => t.id)
+  );
+
+  for (const track of undefinedSubtitles) {
+    if (!keptSubtitleIds.has(track.id)) {
+      keptSubtitles.push(track);
+      keptSubtitleIds.add(track.id);
+    }
+  }
 
   const droppedAudio = audio.filter((t) => !keptAudioIds.has(t.id));
   const droppedSubtitles = subtitles.filter(
@@ -828,5 +858,6 @@ try {
   main();
 } catch (err) {
   console.error(`ERROR: ${err.message}`);
+  console.log(err)
   process.exitCode = 1;
 }
