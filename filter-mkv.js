@@ -359,12 +359,58 @@ function chooseDefaultAudio(tracks) {
 }
 
 function chooseDefaultSubtitle(tracks) {
+  // A "full" track is a normal subtitle without any special-purpose
+  // markers. We prefer these over forced, CC, SDH, karaoke, signs, etc.
+  const fullTracks = tracks.filter((track) => !isSpecialSubtitle(track));
+  const specialTracks = tracks.filter((track) => isSpecialSubtitle(track));
+
+  // First preference: normal/full subtitles, by language priority.
+  const fullDefault =
+    fullTracks.find((t) => isSpanishSubtitle(t, 'castilian')) ||
+    fullTracks.find((t) => isSpanishSubtitle(t, 'latam')) ||
+    fullTracks.find(isEnglish);
+
+  if (fullDefault) {
+    return fullDefault;
+  }
+
+  // If no normal/full subtitle exists, use special tracks using the
+  // same language priority.
   return (
-    tracks.find((t) => isSpanishSubtitle(t, 'castilian')) ||
-    tracks.find((t) => isSpanishSubtitle(t, 'generic')) ||
-    tracks.find((t) => isSpanishSubtitle(t, 'latam')) ||
-    tracks.find(isEnglish) ||
+    specialTracks.find((t) => isSpanishSubtitle(t, 'castilian')) ||
+    specialTracks.find((t) => isSpanishSubtitle(t, 'latam')) ||
+    specialTracks.find(isEnglish) ||
     null
+  );
+}
+
+function isSpecialSubtitle(track) {
+  const p = track.properties || {};
+  const name = normalize(String(p.track_name || ''));
+
+  // mkvmerge's forced flag is the most reliable forced indicator.
+  if (Boolean(p.forced_track)) {
+    return true;
+  }
+
+  return (
+    // Forced / Forzado
+    /\b(forced|forzado|forzados|forzada|forzadas)\b/.test(name) ||
+
+    // Closed captions
+    /\b(cc|closed captions?)\b/.test(name) ||
+
+    // SDH / hearing-impaired subtitles
+    /\b(sdh|subtitles? for (?:the )?deaf|hard of hearing)\b/.test(name) ||
+
+    // Karaoke subtitles
+    /\bkaraoke(?:s)?\b/.test(name) ||
+
+    // Signs, titles, or signs and songs
+    /\b(signs?|carteles?)\b/.test(name) ||
+    /\btitles?\s*(?:and|&|\/)\s*signs?\b/.test(name) ||
+    /\bsigns?\s*(?:and|&|\/)\s*songs?\b/.test(name) ||
+    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name)
   );
 }
 
