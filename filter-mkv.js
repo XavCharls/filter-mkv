@@ -205,40 +205,35 @@ function getSpanishInfo(track) {
   const p = props(track);
   const info = getLanguage(track);
 
-  const langTag = info.lang;
-  const ietfTag = info.ietf;
-  const text = normalize([
-    p.track_name || '',
-    track.codec || '',
-    p.codec_id || '',
-  ].join(' '));
+  const langTag = String(info.lang || '').toLowerCase();
+  const ietfTag = String(info.ietf || '').toLowerCase();
+  const text = normalize(p.track_name || '');
 
-  // Explicit Latin American region takes precedence over a generic
-  // Spanish label in the same track's metadata.
+  // "es", "spa", "es-ES", etc. all identify the track as Spanish.
+  const hasSpanishLanguageTag =
+    langTag === 'es' ||
+    langTag === 'spa' ||
+    langTag.startsWith('es-') ||
+    ietfTag === 'es' ||
+    ietfTag.startsWith('es-');
+
   const latam =
-    LATAM_TAG.test(ietfTag) ||
-    LATAM_TAG.test(langTag) ||
+    ietfTag === 'es-419' ||
+    /^es-419(?:-|$)/.test(ietfTag) ||
     hasAny(text, LATAM_NAME);
 
   const castilian =
-    /^(?:es|spa) es(?: |$)/.test(ietfTag) ||
+    /^es-es(?:-|$)/.test(ietfTag) ||
+    langTag === 'es-es' ||
     hasAny(text, CASTILIAN_NAME);
 
-  const spanishName =
-    /\bspanish\b/.test(text) ||
-    /\bespanol\b/.test(text) ||
-    /\bcastellano\b/.test(text) ||
-    /\bcastilian\b/.test(text);
-
-  const isSpanish =
-    /^(?:es|spa)$/.test(langTag) ||
-    /^(?:es|spa)$/.test(ietfTag) ||
-    /^(?:es|spa) /.test(ietfTag) ||
-    castilian ||
-    latam ||
-    spanishName;
-
-  return { ...info, text, isSpanish, latam, castilian };
+  return {
+    ...info,
+    text,
+    isSpanish: hasSpanishLanguageTag || latam || castilian,
+    latam,
+    castilian,
+  };
 }
 
 function isJapanese(track) {
@@ -289,31 +284,59 @@ function isSpanishSubtitle(track, variant) {
 }
 
 function chooseSpanishSubtitleGroup(subtitles) {
-  const castilian = subtitles.filter((t) =>
-    isSpanishSubtitle(t, 'castilian')
-  );
+  const spanishTracks = subtitles.filter(track => {
+    return getSpanishInfo(track).isSpanish;
+  });
 
-  if (castilian.length) {
-    return { variant: 'Castilian/European Spanish', tracks: castilian };
+  // Explicit or clearly named Latin American tracks.
+  const latamTracks = spanishTracks.filter(track => {
+    return getSpanishInfo(track).latam;
+  });
+
+  // Explicit Castilian tracks.
+  const castilianTracks = spanishTracks.filter(track => {
+    return getSpanishInfo(track).castilian &&
+           !getSpanishInfo(track).latam;
+  });
+
+  // Generic Spanish tracks have a Spanish language tag but no
+  // regional indication. These belong with the preferred Castilian
+  // group and must not be discarded merely because they are "es".
+  const genericTracks = spanishTracks.filter(track => {
+    const info = getSpanishInfo(track);
+
+    return !info.castilian && !info.latam;
+  });
+
+  // Priority:
+  // 1. Castilian + generic Spanish.
+  // 2. Generic Spanish alone.
+  // 3. Latin American Spanish.
+  if (castilianTracks.length > 0) {
+    return {
+      variant: 'Castilian/European Spanish',
+      tracks: [...castilianTracks, ...genericTracks],
+    };
   }
 
-  const generic = subtitles.filter((t) =>
-    isSpanishSubtitle(t, 'generic')
-  );
-
-  if (generic.length) {
-    return { variant: 'generic Spanish', tracks: generic };
+  if (genericTracks.length > 0) {
+    return {
+      variant: 'generic Spanish',
+      tracks: genericTracks,
+    };
   }
 
-  const latam = subtitles.filter((t) =>
-    isSpanishSubtitle(t, 'latam')
-  );
-
-  if (latam.length) {
-    return { variant: 'Latin American Spanish', tracks: latam };
+  if (latamTracks.length > 0) {
+    return {
+      variant: 'Latin American Spanish',
+      tracks: latamTracks,
+    };
   }
 
-  return { variant: 'none', tracks: [] };
+  return {
+    variant: 'none',
+    tracks: [],
+  };
 }
 
 function uniqueTracks(tracks) {
