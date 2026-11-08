@@ -224,6 +224,7 @@ function getSpanishInfo(track) {
 
   const castilian =
     /^es-es(?:-|$)/.test(ietfTag) ||
+    /^spa-es(?:-|$)/.test(ietfTag) ||
     langTag === 'es-es' ||
     hasAny(text, CASTILIAN_NAME);
 
@@ -264,20 +265,23 @@ function isSpanishAudio(track) {
 }
 
 function isSpanishSubtitle(track, variant) {
-  const s = getSpanishInfo(track);
+  const info = getSpanishInfo(track);
 
-  if (!s.isSpanish) return false;
-
-  if (variant === 'castilian') {
-    return s.castilian && !s.latam;
+  if (!info.isSpanish) {
+    return false;
   }
 
-  if (variant === 'generic') {
-    return !s.castilian && !s.latam;
+  if (variant === 'castilian') {
+    // Explicit es-ES metadata is always Castilian.
+    return info.castilian && !info.latam;
   }
 
   if (variant === 'latam') {
-    return s.latam;
+    return info.latam;
+  }
+
+  if (variant === 'generic') {
+    return !info.castilian && !info.latam;
   }
 
   return false;
@@ -377,28 +381,95 @@ function chooseDefaultAudio(tracks) {
 }
 
 function chooseDefaultSubtitle(tracks) {
-  // A "full" track is a normal subtitle without any special-purpose
-  // markers. We prefer these over forced, CC, SDH, karaoke, signs, etc.
-  const fullTracks = tracks.filter((track) => !isSpecialSubtitle(track));
-  const specialTracks = tracks.filter((track) => isSpecialSubtitle(track));
-
-  // First preference: normal/full subtitles, by language priority.
-  const fullDefault =
-    fullTracks.find((t) => isSpanishSubtitle(t, 'castilian')) ||
-    fullTracks.find((t) => isSpanishSubtitle(t, 'latam')) ||
-    fullTracks.find(isEnglish);
-
-  if (fullDefault) {
-    return fullDefault;
+  if (!tracks || tracks.length === 0) {
+    return null;
   }
 
-  // If no normal/full subtitle exists, use special tracks using the
-  // same language priority.
+  function getSubtitleLanguagePriority(track) {
+    const p = track.properties || {};
+
+    const ietf = String(p.language_ietf || '')
+      .trim()
+      .toLowerCase();
+
+    const language = String(p.language || '')
+      .trim()
+      .toLowerCase();
+
+    // Castilian / European Spanish.
+    // Explicit es-ES always has the highest Spanish priority.
+    if (
+      ietf === 'es-es' ||
+      ietf.startsWith('es-es-') ||
+      language === 'es-es'
+    ) {
+      return 0;
+    }
+
+    // Latin American Spanish.
+    if (
+      ietf === 'es-419' ||
+      ietf.startsWith('es-419-')
+    ) {
+      return 1;
+    }
+
+    // English.
+    if (
+      ietf === 'en' ||
+      ietf.startsWith('en-') ||
+      language === 'eng' ||
+      language === 'en'
+    ) {
+      return 2;
+    }
+
+    // Generic Spanish. This is lower than explicitly identified
+    // Castilian/Latin American tracks, but still preferred over
+    // completely unrelated languages.
+    if (
+      ietf === 'es' ||
+      language === 'spa' ||
+      language === 'es'
+    ) {
+      return 3;
+    }
+
+    return 999;
+  }
+
+  // First pass:
+  // Castilian full > Latin American full > English full > generic Spanish full.
+  const fullTracks = tracks
+    .filter((track) => !isSpecialSubtitle(track))
+    .sort(
+      (a, b) =>
+        getSubtitleLanguagePriority(a) -
+        getSubtitleLanguagePriority(b)
+    );
+
+  const bestFull = fullTracks.find(
+    (track) => getSubtitleLanguagePriority(track) < 999
+  );
+
+  if (bestFull) {
+    return bestFull;
+  }
+
+  // Second pass: if there are no full tracks at all, use the same
+  // language priority for forced/CC/SDH/signs/etc.
+  const specialTracks = tracks
+    .filter((track) => isSpecialSubtitle(track))
+    .sort(
+      (a, b) =>
+        getSubtitleLanguagePriority(a) -
+        getSubtitleLanguagePriority(b)
+    );
+
   return (
-    specialTracks.find((t) => isSpanishSubtitle(t, 'castilian')) ||
-    specialTracks.find((t) => isSpanishSubtitle(t, 'latam')) ||
-    specialTracks.find(isEnglish) ||
-    null
+    specialTracks.find(
+      (track) => getSubtitleLanguagePriority(track) < 999
+    ) || null
   );
 }
 
@@ -428,7 +499,10 @@ function isSpecialSubtitle(track) {
     /\b(signs?|carteles?)\b/.test(name) ||
     /\btitles?\s*(?:and|&|\/)\s*signs?\b/.test(name) ||
     /\bsigns?\s*(?:and|&|\/)\s*songs?\b/.test(name) ||
-    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name)
+    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name) ||
+
+    // Subtitle tracks intended to accompany a dubbed audio track.
+    /\b(?:dub|dubtitle?)\b/.test(name)
   );
 }
 
@@ -774,10 +848,13 @@ function main() {
     );
   }
 
-  for (const t of keptSubtitles) {
+  for (const track of keptSubtitles) {
+    const isDefault = defaultSubtitle &&
+      track.id === defaultSubtitle.id;
+
     args.push(
       '--default-track-flag',
-      `${t.id}:${defaultSubtitle?.id === t.id ? 'yes' : 'no'}`
+      `${track.id}:${isDefault ? 'yes' : 'no'}`
     );
   }
 
