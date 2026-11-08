@@ -385,19 +385,18 @@ function chooseDefaultSubtitle(tracks) {
     return null;
   }
 
-  function getSubtitleLanguagePriority(track) {
+  function subtitleLanguagePriority(track) {
     const p = track.properties || {};
-
-    const ietf = String(p.language_ietf || '')
-      .trim()
-      .toLowerCase();
 
     const language = String(p.language || '')
       .trim()
       .toLowerCase();
 
-    // Castilian / European Spanish.
-    // Explicit es-ES always has the highest Spanish priority.
+    const ietf = String(p.language_ietf || '')
+      .trim()
+      .toLowerCase();
+
+    // Explicit Castilian / European Spanish.
     if (
       ietf === 'es-es' ||
       ietf.startsWith('es-es-') ||
@@ -406,31 +405,31 @@ function chooseDefaultSubtitle(tracks) {
       return 0;
     }
 
-    // Latin American Spanish.
+    // Generic Spanish. A plain "es" should be preferred over English.
+    // It has no explicit regional variant, so we treat it as compatible
+    // with the preferred Spanish subtitle group.
+    if (
+      ietf === 'es' ||
+      language === 'es' ||
+      language === 'spa'
+    ) {
+      return 1;
+    }
+
+    // Explicit Latin American Spanish.
     if (
       ietf === 'es-419' ||
       ietf.startsWith('es-419-')
     ) {
-      return 1;
+      return 2;
     }
 
     // English.
     if (
       ietf === 'en' ||
       ietf.startsWith('en-') ||
-      language === 'eng' ||
-      language === 'en'
-    ) {
-      return 2;
-    }
-
-    // Generic Spanish. This is lower than explicitly identified
-    // Castilian/Latin American tracks, but still preferred over
-    // completely unrelated languages.
-    if (
-      ietf === 'es' ||
-      language === 'spa' ||
-      language === 'es'
+      language === 'en' ||
+      language === 'eng'
     ) {
       return 3;
     }
@@ -438,39 +437,41 @@ function chooseDefaultSubtitle(tracks) {
     return 999;
   }
 
-  // First pass:
-  // Castilian full > Latin American full > English full > generic Spanish full.
-  const fullTracks = tracks
+  // First pass: always prefer a normal/full subtitle, regardless of
+  // where special tracks appear in the MKV.
+  const fullCandidates = tracks
     .filter((track) => !isSpecialSubtitle(track))
-    .sort(
-      (a, b) =>
-        getSubtitleLanguagePriority(a) -
-        getSubtitleLanguagePriority(b)
+    .map((track, index) => ({
+      track,
+      index,
+      priority: subtitleLanguagePriority(track),
+    }))
+    .filter((item) => item.priority < 999)
+    // Keep the original MKV order when two tracks have the same priority.
+    .sort((a, b) =>
+      a.priority - b.priority || a.index - b.index
     );
 
-  const bestFull = fullTracks.find(
-    (track) => getSubtitleLanguagePriority(track) < 999
-  );
-
-  if (bestFull) {
-    return bestFull;
+  if (fullCandidates.length > 0) {
+    return fullCandidates[0].track;
   }
 
-  // Second pass: if there are no full tracks at all, use the same
-  // language priority for forced/CC/SDH/signs/etc.
-  const specialTracks = tracks
+  // Second pass: only when there are no full subtitles at all.
+  const specialCandidates = tracks
     .filter((track) => isSpecialSubtitle(track))
-    .sort(
-      (a, b) =>
-        getSubtitleLanguagePriority(a) -
-        getSubtitleLanguagePriority(b)
+    .map((track, index) => ({
+      track,
+      index,
+      priority: subtitleLanguagePriority(track),
+    }))
+    .filter((item) => item.priority < 999)
+    .sort((a, b) =>
+      a.priority - b.priority || a.index - b.index
     );
 
-  return (
-    specialTracks.find(
-      (track) => getSubtitleLanguagePriority(track) < 999
-    ) || null
-  );
+  return specialCandidates.length > 0
+    ? specialCandidates[0].track
+    : null;
 }
 
 function isSpecialSubtitle(track) {
