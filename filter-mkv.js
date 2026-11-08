@@ -198,8 +198,24 @@ const CASTILIAN_NAME = [
   /(?:^|[\s[(|])es(?:$|[\s\])|])/,
 ];
 
-const FORCED_PATTERN = /\b(forced|forzado|forzados|forzada|forzadas)\b/i;
+const FORCED_PATTERN = /\b(?:forced|forzado|forzados|forzada|forzadas)\b/i;
 const KARAOKE_PATTERN = /\bkaraoke(?:s)?\b/i;
+const CC_PATTERN = /\b(?:cc|closed captions?)\b/i;
+const SDH_PATTERN = /\b(?:sdh|subtitles?\s+for\s+(?:the\s+)?deaf|hard\s+of\s+hearing)\b/i;
+const DUB_PATTERN = /\b(?:dub|dubtitle?)\b/i;
+const SIGNS_AND_SONGS_PATTERN = /\b(?:signs?\s*(?:and|&|\/)\s*songs?|carteles?\s*(?:y|&|\/)\s*canciones)\b/i;
+const SIGNS_ONLY_PATTERN = /\b(?:signs?|titles?\s*(?:and|&|\/)\s*signs?|carteles?)\b/i;
+
+function matchesLanguageTag(value, tags) {
+  const text = String(value || '').trim().toLowerCase();
+
+  return tags.some((tag) => {
+    const normalizedTag = tag.toLowerCase();
+    return text === normalizedTag ||
+      text.startsWith(`${normalizedTag} `) ||
+      text.startsWith(`${normalizedTag}-`);
+  });
+}
 
 function getSpanishInfo(track) {
   const p = props(track);
@@ -241,8 +257,8 @@ function isJapanese(track) {
   const { lang, ietf, name } = getLanguage(track);
 
   return (
-    /^(?:ja|jpn)$/.test(lang) ||
-    /^(?:ja|jpn)(?: |$)/.test(ietf) ||
+    matchesLanguageTag(lang, ['ja', 'jpn']) ||
+    matchesLanguageTag(ietf, ['ja', 'jpn']) ||
     /\bjapanese\b|\bjapones\b/.test(name)
   );
 }
@@ -251,8 +267,8 @@ function isEnglish(track) {
   const { lang, ietf, name } = getLanguage(track);
 
   return (
-    /^(?:en|eng)$/.test(lang) ||
-    /^(?:en|eng)(?: |$)/.test(ietf) ||
+    matchesLanguageTag(lang, ['en', 'eng']) ||
+    matchesLanguageTag(ietf, ['en', 'eng']) ||
     /\benglish\b|\bingles\b/.test(name)
   );
 }
@@ -310,25 +326,25 @@ function chooseSpanishSubtitleGroup(subtitles) {
     return getSpanishInfo(track).isSpanish;
   });
 
-  // Explicit or clearly named Latin American tracks.
-  const latamTracks = spanishTracks.filter(track => {
-    return getSpanishInfo(track).latam;
-  });
+  const latamTracks = [];
+  const castilianTracks = [];
+  const genericTracks = [];
 
-  // Explicit Castilian tracks.
-  const castilianTracks = spanishTracks.filter(track => {
-    return getSpanishInfo(track).castilian &&
-           !getSpanishInfo(track).latam;
-  });
-
-  // Generic Spanish tracks have a Spanish language tag but no
-  // regional indication. These belong with the preferred Castilian
-  // group and must not be discarded merely because they are "es".
-  const genericTracks = spanishTracks.filter(track => {
+  for (const track of spanishTracks) {
     const info = getSpanishInfo(track);
 
-    return !info.castilian && !info.latam;
-  });
+    if (info.latam) {
+      latamTracks.push(track);
+      continue;
+    }
+
+    if (info.castilian) {
+      castilianTracks.push(track);
+      continue;
+    }
+
+    genericTracks.push(track);
+  }
 
   // Priority:
   // 1. Castilian + generic Spanish.
@@ -483,28 +499,15 @@ function isSpecialSubtitle(track) {
     return true;
   }
 
-  return (
-    // Forced / Forzado
-    /\b(forced|forzado|forzados|forzada|forzadas)\b/.test(name) ||
-
-    // Closed captions
-    /\b(cc|closed captions?)\b/.test(name) ||
-
-    // SDH / hearing-impaired subtitles
-    /\b(sdh|subtitles? for (?:the )?deaf|hard of hearing)\b/.test(name) ||
-
-    // Karaoke subtitles
-    /\bkaraoke(?:s)?\b/.test(name) ||
-
-    // Signs, titles, or signs and songs
-    /\b(signs?|carteles?)\b/.test(name) ||
-    /\btitles?\s*(?:and|&|\/)\s*signs?\b/.test(name) ||
-    /\bsigns?\s*(?:and|&|\/)\s*songs?\b/.test(name) ||
-    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name) ||
-
-    // Subtitle tracks intended to accompany a dubbed audio track.
-    /\b(?:dub|dubtitle?)\b/.test(name)
-  );
+  return hasAny(name, [
+    FORCED_PATTERN,
+    CC_PATTERN,
+    SDH_PATTERN,
+    KARAOKE_PATTERN,
+    SIGNS_ONLY_PATTERN,
+    SIGNS_AND_SONGS_PATTERN,
+    DUB_PATTERN,
+  ]);
 }
 
 function getDisplayLanguage(track) {
@@ -514,11 +517,11 @@ function getDisplayLanguage(track) {
   const name = getName(track);
 
   // Use standardized language tags first.
-  if (/^(?:ja|jpn)(?: |$)/.test(ietf) || /^(?:ja|jpn)$/.test(lang)) {
+  if (matchesLanguageTag(ietf, ['ja', 'jpn']) || matchesLanguageTag(lang, ['ja', 'jpn'])) {
     return 'Japonés';
   }
 
-  if (/^(?:en|eng)(?: |$)/.test(ietf) || /^(?:en|eng)$/.test(lang)) {
+  if (matchesLanguageTag(ietf, ['en', 'eng']) || matchesLanguageTag(lang, ['en', 'eng'])) {
     return 'Inglés';
   }
 
@@ -526,7 +529,7 @@ function getDisplayLanguage(track) {
     return 'Latino';
   }
 
-  if (/^(?:es|spa) es(?: |$)/.test(ietf)) {
+  if (matchesLanguageTag(ietf, ['es', 'spa']) || matchesLanguageTag(lang, ['es', 'spa'])) {
     return 'Español';
   }
 
@@ -563,31 +566,13 @@ function getSubtitleSuffix(track) {
   const name = normalize(originalName);
   const suffixes = [];
 
-  const isForced =
-    Boolean(p.forced_track) ||
-    /\b(forced|forzado|forzados|forzada|forzadas)\b/.test(name);
-
-  const isKaraoke =
-    /\bkaraoke(?:s)?\b/.test(name);
-
-  const isSignsAndSongs =
-    /\b(signs?\s*(?:and|&|\/)\s*songs?)\b/.test(name) ||
-    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name);
-
-  const isSignsOnly =
-    !isSignsAndSongs && (
-      /\b(?:signs?|carteles?)\b/.test(name) ||
-      /\btitles?\s*(?:and|&|\/)\s*signs?\b/.test(name)
-    );
-
-  const isCC =
-    /\b(?:cc|closed captions?)\b/.test(name);
-
-  const isSDH =
-    /\b(?:sdh|subtitles?\s+for\s+(?:the\s+)?deaf|hard\s+of\s+hearing)\b/.test(name);
-
-  const isDubTitle =
-    /\b(?:dub|dubtitle?)\b/.test(name);
+  const isForced = Boolean(p.forced_track) || FORCED_PATTERN.test(name);
+  const isKaraoke = KARAOKE_PATTERN.test(name);
+  const isSignsAndSongs = SIGNS_AND_SONGS_PATTERN.test(name);
+  const isSignsOnly = !isSignsAndSongs && SIGNS_ONLY_PATTERN.test(name);
+  const isCC = CC_PATTERN.test(name);
+  const isSDH = SDH_PATTERN.test(name);
+  const isDubTitle = DUB_PATTERN.test(name);
 
   // Keep a predictable order in renamed tracks.
   if (isKaraoke) suffixes.push('Karaoke');
@@ -607,11 +592,11 @@ function getSubtitleSuffix(track) {
 }
 
 function getAccessibilitySuffix(trackName) {
-  if (/\b(?:cc|closed captions?)\b/i.test(trackName)) {
+  if (CC_PATTERN.test(trackName)) {
     return 'CC';
   }
 
-  if (/\b(?:sdh|subtitles? for (?:the )?deaf|hard of hearing)\b/i.test(trackName)) {
+  if (SDH_PATTERN.test(trackName)) {
     return 'SDH';
   }
 
@@ -621,19 +606,11 @@ function getAccessibilitySuffix(trackName) {
 function getSignsSuffix(trackName) {
   const name = normalize(trackName);
 
-  const signsAndSongs =
-    /\b(signs?\s*(?:and|&|\/)\s*songs?)\b/.test(name) ||
-    /\bcarteles?\s*(?:y|&|\/)\s*canciones\b/.test(name);
-
-  if (signsAndSongs) {
+  if (SIGNS_AND_SONGS_PATTERN.test(name)) {
     return 'Carteles y Canciones';
   }
 
-  const signsOnly =
-    /\b(signs?|titles?\s*(?:and|&|\/)\s*signs?)\b/.test(name) ||
-    /\bcarteles?\b/.test(name);
-
-  if (signsOnly) {
+  if (SIGNS_ONLY_PATTERN.test(name)) {
     return 'Carteles';
   }
 
@@ -892,20 +869,18 @@ function main() {
     );
   });
 
-  const outputVideo = outTracks.filter((t) => t.type === 'video').length;
-  const outputAudio = outTracks.filter((t) => t.type === 'audio').length;
-  const outputSubs = outTracks.filter((t) => t.type === 'subtitles').length;
+  const outputAudio = outTracks.filter((t) => t.type === 'audio').map(e => e.properties.track_name).join();
+  const outputSubs = outTracks.filter((t) => t.type === 'subtitles').map(e => e.properties.track_name).join();
 
   if (CONFIG.verbose) {
     console.log('\nFinished successfully.');
     console.log(`Output: ${actualOutputPath}`);
     console.log(
-      `Tracks: ${outputVideo} video, ${outputAudio} audio, ` +
-      `${outputSubs} subtitles`
+      `Tracks: ${outputAudio} audio; ${outputSubs} subtitles`
     );
   } else {
     console.log(
-      `video=${outputVideo} audio=${outputAudio} subtitles=${outputSubs} | ` +
+      `audio=${outputAudio}; subtitles=${outputSubs} | ` +
       `defaultAudio=${defaultAudio ? getDisplayTrackName(defaultAudio) : 'none'} | ` +
       `defaultSubtitle=${defaultSubtitle ? getDisplayTrackName(defaultSubtitle) : 'none'}`
     );
