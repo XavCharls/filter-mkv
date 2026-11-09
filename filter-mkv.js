@@ -150,6 +150,25 @@ function getLanguage(track) {
   };
 }
 
+function getTrackLanguage(track) {
+  const p = track.properties || {};
+
+  return {
+    language: String(p.language || '').trim().toLowerCase(),
+    ietf: String(p.language_ietf || '').trim().toLowerCase(),
+  };
+}
+
+function hasExplicitLanguage(track) {
+  const { language, ietf } = getTrackLanguage(track);
+
+  // "und" and empty values are not useful language identification.
+  return Boolean(
+    (language && language !== 'und') ||
+    (ietf && ietf !== 'und')
+  );
+}
+
 function hasAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
@@ -218,38 +237,104 @@ function matchesLanguageTag(value, tags) {
 }
 
 function getSpanishInfo(track) {
-  const p = props(track);
-  const info = getLanguage(track);
+  const p = track.properties || {};
+  const { language, ietf } = getTrackLanguage(track);
 
-  const langTag = String(info.lang || '').toLowerCase();
-  const ietfTag = String(info.ietf || '').toLowerCase();
-  const text = normalize(p.track_name || '');
+  const text = normalize(String(p.track_name || ''));
 
-  // "es", "spa", "es-ES", etc. all identify the track as Spanish.
-  const hasSpanishLanguageTag =
-    langTag === 'es' ||
-    langTag === 'spa' ||
-    langTag.startsWith('es-') ||
-    ietfTag === 'es' ||
-    ietfTag.startsWith('es-');
+  // ------------------------------------------------------------
+  // STEP 1: Explicit language metadata always wins.
+  // ------------------------------------------------------------
 
-  const latam =
-    ietfTag === 'es-419' ||
-    /^es-419(?:-|$)/.test(ietfTag) ||
-    hasAny(text, LATAM_NAME);
+  // Explicit Latin American Spanish.
+  if (
+    ietf === 'es-419' ||
+    ietf.startsWith('es-419-')
+  ) {
+    return {
+      isSpanish: true,
+      castilian: false,
+      latam: true,
+      generic: false,
+    };
+  }
 
-  const castilian =
-    /^es-es(?:-|$)/.test(ietfTag) ||
-    /^spa-es(?:-|$)/.test(ietfTag) ||
-    langTag === 'es-es' ||
-    hasAny(text, CASTILIAN_NAME);
+  // Explicit Castilian / European Spanish.
+  if (
+    ietf === 'es-es' ||
+    ietf.startsWith('es-es-') ||
+    language === 'es-es'
+  ) {
+    return {
+      isSpanish: true,
+      castilian: true,
+      latam: false,
+      generic: false,
+    };
+  }
+
+  // Explicit generic Spanish.
+  if (
+    ietf === 'es' ||
+    language === 'es' ||
+    language === 'spa'
+  ) {
+    // A generic Spanish tag is Spanish, but the name can still help
+    // determine whether it is Castilian or Latin American.
+    const latam = hasAny(text, LATAM_NAME);
+    const castilian = !latam && hasAny(text, CASTILIAN_NAME);
+
+    return {
+      isSpanish: true,
+      castilian,
+      latam,
+      generic: !castilian && !latam,
+    };
+  }
+
+  // ------------------------------------------------------------
+  // STEP 2: A different explicit language means "not Spanish".
+  //
+  // For example: fr-FR + name "European" remains French.
+  // ------------------------------------------------------------
+
+  if (hasExplicitLanguage(track)) {
+    return {
+      isSpanish: false,
+      castilian: false,
+      latam: false,
+      generic: false,
+    };
+  }
+
+  // ------------------------------------------------------------
+  // STEP 3: Only undefined/unknown tracks may use their name to
+  // identify the language.
+  // ------------------------------------------------------------
+
+  const looksSpanish =
+    /\bspanish\b/.test(text) ||
+    /\bespanol\b/.test(text) ||
+    /\bcastellano\b/.test(text) ||
+    /\bcastilian\b/.test(text);
+
+  if (!looksSpanish) {
+    return {
+      isSpanish: false,
+      castilian: false,
+      latam: false,
+      generic: false,
+    };
+  }
+
+  const latam = hasAny(text, LATAM_NAME);
+  const castilian = !latam && hasAny(text, CASTILIAN_NAME);
 
   return {
-    ...info,
-    text,
-    isSpanish: hasSpanishLanguageTag || latam || castilian,
-    latam,
+    isSpanish: true,
     castilian,
+    latam,
+    generic: !castilian && !latam,
   };
 }
 
@@ -274,10 +359,8 @@ function isEnglish(track) {
 }
 
 function isSpanishAudio(track) {
-  const s = getSpanishInfo(track);
-
-  // Keep Castilian or generic Spanish; reject explicit Latin American.
-  return s.isSpanish && !s.latam;
+  let info = getSpanishInfo(track)
+  return info.isSpanish && !info.latam;
 }
 
 function isSpanishSubtitle(track, variant) {
