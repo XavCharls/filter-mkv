@@ -58,6 +58,7 @@ function showHelp() {
 function parseArgs(argv) {
   const options = {
     verbose: true,
+    test: false,
     input: null,
     output: null,
     help: false,
@@ -70,6 +71,8 @@ function parseArgs(argv) {
       options.help = true;
     } else if (arg === '--no-verbose') {
       options.verbose = false;
+    } else if (arg === '--test') {
+      options.test = true;
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}\nUse --help for usage.`);
     } else {
@@ -91,6 +94,103 @@ function log(...args) {
   if (CONFIG.verbose) {
     console.log(...args);
   }
+}
+
+function printTestVerification({
+  keptVideo,
+  keptAudio,
+  keptSubtitles,
+  defaultAudio,
+  defaultSubtitle,
+}) {
+  console.log('\n--- Verification of output (TEST MODE - no file created) ---');
+
+  let outputId = 0;
+
+  // Video tracks
+  for (const track of keptVideo) {
+    printSimulatedTrack(
+      'VIDEO',
+      outputId++,
+      track,
+      null,
+      false
+    );
+  }
+
+  // Audio tracks
+  for (const track of keptAudio) {
+    const isDefault =
+      defaultAudio &&
+      track.id === defaultAudio.id;
+
+    printSimulatedTrack(
+      'AUDIO',
+      outputId++,
+      track,
+      defaultAudio,
+      isDefault
+    );
+  }
+
+  // Subtitle tracks
+  for (const track of keptSubtitles) {
+    const isDefault =
+      defaultSubtitle &&
+      track.id === defaultSubtitle.id;
+
+    printSimulatedTrack(
+      'SUBTITLES',
+      outputId++,
+      track,
+      defaultSubtitle,
+      isDefault
+    );
+  }
+
+  console.log('\nTEST MODE: No output file was created and the source file was not modified.');
+}
+
+function printSimulatedTrack(
+  type,
+  outputId,
+  track,
+  defaultTrack,
+  isDefault
+) {
+  const p = track.properties || {};
+
+  const language =
+    p.language_ietf ||
+    p.language ||
+    'und';
+
+  const name = getDisplayTrackName(track) ||
+    p.track_name ||
+    '(unnamed)';
+
+  const flags = [];
+
+  if (p.forced_track) {
+    flags.push('forced');
+  }
+
+  if (isDefault) {
+    flags.push('default');
+  }
+
+  let line =
+    `${type} ID ${outputId}: ${language} | ${name}`;
+
+  if (flags.length > 0) {
+    line += ` [${flags.join(', ')}]`;
+  }
+
+  if (isDefault) {
+    line += ' (DEFAULT)';
+  }
+
+  console.log(line);
 }
 
 let CONFIG = { verbose: true };
@@ -856,28 +956,30 @@ function main() {
     (t) => !keptSubtitleIds.has(t.id)
   );
 
-  log('\n--- Video tracks kept ---');
-  keptVideo.forEach((t) => log(' KEEP ', getTrackLabel(t)));
-
-  log('\n--- Audio tracks kept ---');
-  keptAudio.forEach((t) => {
-    const marker = defaultAudio?.id === t.id ? ' (NEW DEFAULT)' : '';
-    log(' KEEP ', getTrackLabel(t) + marker);
-  });
-
-  log('\n--- Audio tracks dropped ---');
-  droppedAudio.forEach((t) => log(' DROP ', getTrackLabel(t)));
-
-  log(`\nSpanish subtitle group selected: ${spanishChoice.variant}`);
-
-  log('\n--- Subtitle tracks kept ---');
-  keptSubtitles.forEach((t) => {
-    const marker = defaultSubtitle?.id === t.id ? ' (NEW DEFAULT)' : '';
-    log(' KEEP ', getTrackLabel(t) + marker);
-  });
-
-  log('\n--- Subtitle tracks dropped ---');
-  droppedSubtitles.forEach((t) => log(' DROP ', getTrackLabel(t)));
+  if (!options.test) {
+    log('\n--- Video tracks kept ---');
+    keptVideo.forEach((t) => log(' KEEP ', getTrackLabel(t)));
+  
+    log('\n--- Audio tracks kept ---');
+    keptAudio.forEach((t) => {
+      const marker = defaultAudio?.id === t.id ? ' (NEW DEFAULT)' : '';
+      log(' KEEP ', getTrackLabel(t) + marker);
+    });
+  
+    log('\n--- Audio tracks dropped ---');
+    droppedAudio.forEach((t) => log(' DROP ', getTrackLabel(t)));
+  
+    log(`\nSpanish subtitle group selected: ${spanishChoice.variant}`);
+  
+    log('\n--- Subtitle tracks kept ---');
+    keptSubtitles.forEach((t) => {
+      const marker = defaultSubtitle?.id === t.id ? ' (NEW DEFAULT)' : '';
+      log(' KEEP ', getTrackLabel(t) + marker);
+    });
+  
+    log('\n--- Subtitle tracks dropped ---');
+    droppedSubtitles.forEach((t) => log(' DROP ', getTrackLabel(t)));
+  }
 
   const args = ['-o', actualOutputPath];
 
@@ -931,6 +1033,20 @@ function main() {
   // The input file must be the final argument.
   // No global-tags, chapters, attachments or other content are disabled.
   args.push(inputPath);
+
+  // Test mode stops here. All selection logic has already run, so the
+  // displayed result represents what the final MKV would contain.
+  if (options.test) {
+    printTestVerification({
+      keptVideo,
+      keptAudio,
+      keptSubtitles,
+      defaultAudio,
+      defaultSubtitle,
+    });
+
+    process.exit(0);
+  }
 
   log('\n--- mkvmerge command ---');
   log('mkvmerge ' + args.map((a) =>
