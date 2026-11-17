@@ -19,6 +19,8 @@ Arguments:
 
 Options:
   -h, --help     Show this guide and exit.
+  --test         Run the script in test mode. No output file is created,
+                 but theselection logic is executed and the result is printed.
   --no-verbose   Print only a short success summary.
                  Errors are still printed.
 
@@ -47,9 +49,65 @@ What it does:
 Examples:
   ./filter-mkv.js "/media/input.mkv" "/media/output.mkv"
   ./filter-mkv.js "/media/input.mkv" "/media/output.mkv" --no-verbose
+  ./filter-mkv.js "/media/input.mkv" "/media/output.mkv" --test
   ./filter-mkv.js --help
   for file in /mnt/media/series/serie/Season\ 1/*.mkv; do ./filter-mkv.js "$file" "$file"; done
 `;
+
+
+// Explicit Spanish regional tags that indicate Latin American Spanish.
+const LATAM_TAG = /^(?:es|spa) (?:419|mx|ar|bo|br|cl|co|cr|cu|do|ec|gt|hn|ni|pa|pe|pr|py|sv|us|uy|ve)(?: |$)/;
+
+const LATAM_NAME = [
+  /\blatin america(?:n)?\b/,
+  /\blatin\b/,
+  /\blatinoamerica(?:no|na)?s?\b/,
+  /\blatino\b/,
+  /\blatam\b/,
+  /\bspanish lat\b/,
+  /\bspanish latin\b/,
+  /\b(?:^|[\s[(|_])la(?:$|[\s\])|_])/,
+  /\b(?:^|[\s[(|_])lat(?:$|[\s\])|_])/,
+
+  /\bsouth american spanish\b/,
+  /\bhispanoamerica(?:no|na)?s?\b/,
+
+  /\b(?:mexican|mexico|argentinian|argentina|venezuelan|venezuela)\b/,
+  /\b(?:colombian|colombia|chilean|chile|peruvian|peru)\b/,
+  /\b(?:bolivian|bolivia|ecuadorian|ecuador|uruguayan|uruguay)\b/,
+  /\b(?:paraguayan|paraguay)\b/,
+];
+
+const CASTILIAN_NAME = [
+  /\bcastilian\b/,
+  /\bcastellano\b/,
+  /\beuropean\b/,
+  /\beuropean spanish\b/,
+  /\bspanish europe\b/,
+  /\bspanish spain\b/,
+  /\bspain spanish\b/,
+
+  /\bespanol espana\b/,
+  /\bespanol de espana\b/,
+  /\bespana\b/,
+
+  /\bspanish esp\b/,
+  /\bspanish es\b/,
+
+  // Standalone ES/ESP labels.
+  /(?:^|[\s[(|])esp(?:$|[\s\])|])/,
+  /(?:^|[\s[(|])es(?:$|[\s\])|])/,
+];
+
+const FORCED_PATTERN = /\b(?:forced|forzado|forzados|forzada|forzadas)\b/i;
+const KARAOKE_PATTERN = /\bkaraoke(?:s)?\b/i;
+const CC_PATTERN = /\b(?:cc|closed captions?)\b/i;
+const SDH_PATTERN = /\b(?:sdh|subtitles?\s+for\s+(?:the\s+)?deaf|hard\s+of\s+hearing)\b/i;
+const DUB_PATTERN = /\b(?:dub|dubtitle?)\b/i;
+const SIGNS_AND_SONGS_PATTERN = /\b(?:signs?\s*(?:and|&|\/)\s*songs?|carteles?\s*(?:y|&|\/)\s*canciones)\b/i;
+const SIGNS_ONLY_PATTERN = /\b(?:signs?|titles?\s*(?:and|&|\/)\s*signs?|carteles?)\b/i;
+
+let CONFIG = { verbose: true };
 
 function showHelp() {
   console.log(HELP.trim());
@@ -193,8 +251,6 @@ function printSimulatedTrack(
   console.log(line);
 }
 
-let CONFIG = { verbose: true };
-
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -272,58 +328,6 @@ function hasExplicitLanguage(track) {
 function hasAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
-
-// Explicit Spanish regional tags that indicate Latin American Spanish.
-const LATAM_TAG = /^(?:es|spa) (?:419|mx|ar|bo|br|cl|co|cr|cu|do|ec|gt|hn|ni|pa|pe|pr|py|sv|us|uy|ve)(?: |$)/;
-
-const LATAM_NAME = [
-  /\blatin america(?:n)?\b/,
-  /\blatin\b/,
-  /\blatinoamerica(?:no|na)?s?\b/,
-  /\blatino\b/,
-  /\blatam\b/,
-  /\bspanish lat\b/,
-  /\bspanish latin\b/,
-  /\b(?:^|[\s[(|_])la(?:$|[\s\])|_])/,
-  /\b(?:^|[\s[(|_])lat(?:$|[\s\])|_])/,
-
-  /\bsouth american spanish\b/,
-  /\bhispanoamerica(?:no|na)?s?\b/,
-
-  /\b(?:mexican|mexico|argentinian|argentina|venezuelan|venezuela)\b/,
-  /\b(?:colombian|colombia|chilean|chile|peruvian|peru)\b/,
-  /\b(?:bolivian|bolivia|ecuadorian|ecuador|uruguayan|uruguay)\b/,
-  /\b(?:paraguayan|paraguay)\b/,
-];
-
-const CASTILIAN_NAME = [
-  /\bcastilian\b/,
-  /\bcastellano\b/,
-  /\beuropean\b/,
-  /\beuropean spanish\b/,
-  /\bspanish europe\b/,
-  /\bspanish spain\b/,
-  /\bspain spanish\b/,
-
-  /\bespanol espana\b/,
-  /\bespanol de espana\b/,
-  /\bespana\b/,
-
-  /\bspanish esp\b/,
-  /\bspanish es\b/,
-
-  // Standalone ES/ESP labels.
-  /(?:^|[\s[(|])esp(?:$|[\s\])|])/,
-  /(?:^|[\s[(|])es(?:$|[\s\])|])/,
-];
-
-const FORCED_PATTERN = /\b(?:forced|forzado|forzados|forzada|forzadas)\b/i;
-const KARAOKE_PATTERN = /\bkaraoke(?:s)?\b/i;
-const CC_PATTERN = /\b(?:cc|closed captions?)\b/i;
-const SDH_PATTERN = /\b(?:sdh|subtitles?\s+for\s+(?:the\s+)?deaf|hard\s+of\s+hearing)\b/i;
-const DUB_PATTERN = /\b(?:dub|dubtitle?)\b/i;
-const SIGNS_AND_SONGS_PATTERN = /\b(?:signs?\s*(?:and|&|\/)\s*songs?|carteles?\s*(?:y|&|\/)\s*canciones)\b/i;
-const SIGNS_ONLY_PATTERN = /\b(?:signs?|titles?\s*(?:and|&|\/)\s*signs?|carteles?)\b/i;
 
 function matchesLanguageTag(value, tags) {
   const text = String(value || '').trim().toLowerCase();
@@ -461,29 +465,6 @@ function isEnglish(track) {
 function isSpanishAudio(track) {
   let info = getSpanishInfo(track)
   return info.isSpanish && !info.latam;
-}
-
-function isSpanishSubtitle(track, variant) {
-  const info = getSpanishInfo(track);
-
-  if (!info.isSpanish) {
-    return false;
-  }
-
-  if (variant === 'castilian') {
-    // Explicit es-ES metadata is always Castilian.
-    return info.castilian && !info.latam;
-  }
-
-  if (variant === 'latam') {
-    return info.latam;
-  }
-
-  if (variant === 'generic') {
-    return !info.castilian && !info.latam;
-  }
-
-  return false;
 }
 
 function isUndefinedTrack(track) {
@@ -774,32 +755,6 @@ function getSubtitleSuffix(track) {
   return suffixes;
 }
 
-function getAccessibilitySuffix(trackName) {
-  if (CC_PATTERN.test(trackName)) {
-    return 'CC';
-  }
-
-  if (SDH_PATTERN.test(trackName)) {
-    return 'SDH';
-  }
-
-  return null;
-}
-
-function getSignsSuffix(trackName) {
-  const name = normalize(trackName);
-
-  if (SIGNS_AND_SONGS_PATTERN.test(name)) {
-    return 'Carteles y Canciones';
-  }
-
-  if (SIGNS_ONLY_PATTERN.test(name)) {
-    return 'Carteles';
-  }
-
-  return null;
-}
-
 function getDisplayTrackName(track) {
   const languageName = getDisplayLanguage(track);
 
@@ -841,27 +796,6 @@ function getTrackLabel(track) {
 
   return `ID ${track.id}: ${lang} | ${name}` +
     (flags.length ? ` [${flags.join(', ')}]` : '');
-}
-
-function makeOutputPath(inputPath) {
-  const folder = path.join(
-    path.dirname(inputPath),
-    path.basename(inputPath, path.extname(inputPath)) + '_filtered'
-  );
-
-  fs.mkdirSync(folder, { recursive: true });
-
-  const ext = path.extname(inputPath);
-  const stem = path.basename(inputPath, ext);
-  let candidate = path.join(folder, path.basename(inputPath));
-  let number = 1;
-
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(folder, `${stem}_${number}${ext}`);
-    number++;
-  }
-
-  return candidate;
 }
 
 function main() {
