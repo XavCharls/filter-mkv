@@ -109,6 +109,11 @@ const SIGNS_ONLY_PATTERN = /\b(?:signs?|titles?\s*(?:and|&|\/)\s*signs?|carteles
 
 let CONFIG = { verbose: true };
 
+/**
+ * **********************************************************
+ *                   Funciones generales
+ * **********************************************************
+ */
 function showHelp() {
   console.log(HELP.trim());
 }
@@ -289,10 +294,20 @@ function normalize(value = '') {
     .trim();
 }
 
+function hasAny(text, patterns) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
 function props(track) {
   return track.properties || {};
 }
+/***********************************************************/
 
+/**
+ * **********************************************************
+ *                   Funciones de tracks
+ * **********************************************************
+ */
 function getName(track) {
   return normalize(props(track).track_name || '');
 }
@@ -315,29 +330,128 @@ function getTrackLanguage(track) {
   };
 }
 
-function hasExplicitLanguage(track) {
-  const { language, ietf } = getTrackLanguage(track);
+function getDisplayLanguage(track) {
+  const p = props(track);
+  const ietf = normalize(p.language_ietf || '');
+  const lang = normalize(p.language || '');
+  const name = getName(track);
 
-  // "und" and empty values are not useful language identification.
-  return Boolean(
-    (language && language !== 'und') ||
-    (ietf && ietf !== 'und')
-  );
+  // Use standardized language tags first.
+  if (matchesLanguageTag(ietf, ['ja', 'jpn']) || matchesLanguageTag(lang, ['ja', 'jpn'])) {
+    return 'Japonés';
+  }
+
+  if (matchesLanguageTag(ietf, ['en', 'eng']) || matchesLanguageTag(lang, ['en', 'eng'])) {
+    return 'Inglés';
+  }
+
+  if (LATAM_TAG.test(ietf) || LATAM_TAG.test(lang)) {
+    return 'Latino';
+  }
+
+  if (matchesLanguageTag(ietf, ['es', 'spa']) || matchesLanguageTag(lang, ['es', 'spa'])) {
+    return 'Español';
+  }
+
+  const spanish = getSpanishInfo(track);
+
+  if (spanish.latam) {
+    return 'Latino';
+  }
+  if (spanish.castilian) {
+    return 'Español';
+  }
+  if (spanish.isSpanish) {
+    return 'Español';
+  }
+
+  // Fallback for missing or incomplete language metadata.
+  if (/\bjapanese\b|\bjapones\b/.test(name)) {
+    return 'Japonés';
+  }
+  if (/\benglish\b|\bingles\b/.test(name)) {
+    return 'Inglés';
+  }
+  if (/\bspanish\b|\bespanol\b|\bcastellano\b/.test(name)) {
+    return 'Español';
+  }
+
+  return null;
 }
 
-function hasAny(text, patterns) {
-  return patterns.some((pattern) => pattern.test(text));
+function getSubtitleSuffix(track) {
+  const p = track.properties || {};
+  const originalName = String(p.track_name || '');
+
+  const name = normalize(originalName);
+  const suffixes = [];
+
+  const isForced = Boolean(p.forced_track) || FORCED_PATTERN.test(name);
+  const isKaraoke = KARAOKE_PATTERN.test(name);
+  const isSignsAndSongs = SIGNS_AND_SONGS_PATTERN.test(name);
+  const isSignsOnly = !isSignsAndSongs && SIGNS_ONLY_PATTERN.test(name);
+  const isCC = CC_PATTERN.test(name);
+  const isSDH = SDH_PATTERN.test(name);
+  const isDubTitle = DUB_PATTERN.test(name);
+
+  // Keep a predictable order in renamed tracks.
+  if (isKaraoke) suffixes.push('Karaoke');
+
+  if (isSignsAndSongs) {
+    suffixes.push('Carteles y Canciones');
+  } else if (isSignsOnly) {
+    suffixes.push('Carteles');
+  }
+
+  if (isCC) suffixes.push('CC');
+  if (isSDH) suffixes.push('SDH');
+  if (isForced) suffixes.push('Forzado');
+  if (isDubTitle) suffixes.push('Dub');
+
+  return suffixes;
 }
 
-function matchesLanguageTag(value, tags) {
-  const text = String(value || '').trim().toLowerCase();
+function getDisplayTrackName(track) {
+  const languageName = getDisplayLanguage(track);
 
-  return tags.some((tag) => {
-    const normalizedTag = tag.toLowerCase();
-    return text === normalizedTag ||
-      text.startsWith(`${normalizedTag} `) ||
-      text.startsWith(`${normalizedTag}-`);
-  });
+  if (!languageName) {
+    return null;
+  }
+
+  // Only subtitles receive these descriptive suffixes.
+  if (track.type === 'subtitles') {
+    const suffixes = getSubtitleSuffix(track);
+
+    return suffixes.length
+      ? `${languageName} ${suffixes.join(' ')}`
+      : languageName;
+  }
+
+  // Audio tracks retain only the language name.
+  return languageName;
+}
+
+function getTrackLabel(track) {
+  const p = props(track);
+  const lang = p.language_ietf || p.language || 'und';
+  const name = p.track_name || '(unnamed)';
+  const flags = [];
+
+  if (p.default_track) {
+    flags.push('default');
+  }
+  if (p.forced_track) {
+    flags.push('forced');
+  }
+  if (p.hearing_impaired) {
+    flags.push('hearing-impaired');
+  }
+  if (p.visual_impaired) {
+    flags.push('visual-impaired');
+  }
+
+  return `ID ${track.id}: ${lang} | ${name}` +
+    (flags.length ? ` [${flags.join(', ')}]` : '');
 }
 
 function getSpanishInfo(track) {
@@ -442,6 +556,27 @@ function getSpanishInfo(track) {
   };
 }
 
+function hasExplicitLanguage(track) {
+  const { language, ietf } = getTrackLanguage(track);
+
+  // "und" and empty values are not useful language identification.
+  return Boolean(
+    (language && language !== 'und') ||
+    (ietf && ietf !== 'und')
+  );
+}
+
+function matchesLanguageTag(value, tags) {
+  const text = String(value || '').trim().toLowerCase();
+
+  return tags.some((tag) => {
+    const normalizedTag = tag.toLowerCase();
+    return text === normalizedTag ||
+      text.startsWith(`${normalizedTag} `) ||
+      text.startsWith(`${normalizedTag}-`);
+  });
+}
+
 function isJapanese(track) {
   const { lang, ietf, name } = getLanguage(track);
 
@@ -483,6 +618,26 @@ function isUndefinedTrack(track) {
     languageIetf === 'und';
 
   return undefinedLanguage && !name;
+}
+
+function isSpecialSubtitle(track) {
+  const p = track.properties || {};
+  const name = normalize(String(p.track_name || ''));
+
+  // mkvmerge's forced flag is the most reliable forced indicator.
+  if (Boolean(p.forced_track)) {
+    return true;
+  }
+
+  return hasAny(name, [
+    FORCED_PATTERN,
+    CC_PATTERN,
+    SDH_PATTERN,
+    KARAOKE_PATTERN,
+    SIGNS_ONLY_PATTERN,
+    SIGNS_AND_SONGS_PATTERN,
+    DUB_PATTERN,
+  ]);
 }
 
 function chooseSpanishSubtitleGroup(subtitles) {
@@ -653,150 +808,7 @@ function chooseDefaultSubtitle(tracks) {
     ? specialCandidates[0].track
     : null;
 }
-
-function isSpecialSubtitle(track) {
-  const p = track.properties || {};
-  const name = normalize(String(p.track_name || ''));
-
-  // mkvmerge's forced flag is the most reliable forced indicator.
-  if (Boolean(p.forced_track)) {
-    return true;
-  }
-
-  return hasAny(name, [
-    FORCED_PATTERN,
-    CC_PATTERN,
-    SDH_PATTERN,
-    KARAOKE_PATTERN,
-    SIGNS_ONLY_PATTERN,
-    SIGNS_AND_SONGS_PATTERN,
-    DUB_PATTERN,
-  ]);
-}
-
-function getDisplayLanguage(track) {
-  const p = props(track);
-  const ietf = normalize(p.language_ietf || '');
-  const lang = normalize(p.language || '');
-  const name = getName(track);
-
-  // Use standardized language tags first.
-  if (matchesLanguageTag(ietf, ['ja', 'jpn']) || matchesLanguageTag(lang, ['ja', 'jpn'])) {
-    return 'Japonés';
-  }
-
-  if (matchesLanguageTag(ietf, ['en', 'eng']) || matchesLanguageTag(lang, ['en', 'eng'])) {
-    return 'Inglés';
-  }
-
-  if (LATAM_TAG.test(ietf) || LATAM_TAG.test(lang)) {
-    return 'Latino';
-  }
-
-  if (matchesLanguageTag(ietf, ['es', 'spa']) || matchesLanguageTag(lang, ['es', 'spa'])) {
-    return 'Español';
-  }
-
-  const spanish = getSpanishInfo(track);
-
-  if (spanish.latam) {
-    return 'Latino';
-  }
-  if (spanish.castilian) {
-    return 'Español';
-  }
-  if (spanish.isSpanish) {
-    return 'Español';
-  }
-
-  // Fallback for missing or incomplete language metadata.
-  if (/\bjapanese\b|\bjapones\b/.test(name)) {
-    return 'Japonés';
-  }
-  if (/\benglish\b|\bingles\b/.test(name)) {
-    return 'Inglés';
-  }
-  if (/\bspanish\b|\bespanol\b|\bcastellano\b/.test(name)) {
-    return 'Español';
-  }
-
-  return null;
-}
-
-function getSubtitleSuffix(track) {
-  const p = track.properties || {};
-  const originalName = String(p.track_name || '');
-
-  const name = normalize(originalName);
-  const suffixes = [];
-
-  const isForced = Boolean(p.forced_track) || FORCED_PATTERN.test(name);
-  const isKaraoke = KARAOKE_PATTERN.test(name);
-  const isSignsAndSongs = SIGNS_AND_SONGS_PATTERN.test(name);
-  const isSignsOnly = !isSignsAndSongs && SIGNS_ONLY_PATTERN.test(name);
-  const isCC = CC_PATTERN.test(name);
-  const isSDH = SDH_PATTERN.test(name);
-  const isDubTitle = DUB_PATTERN.test(name);
-
-  // Keep a predictable order in renamed tracks.
-  if (isKaraoke) suffixes.push('Karaoke');
-
-  if (isSignsAndSongs) {
-    suffixes.push('Carteles y Canciones');
-  } else if (isSignsOnly) {
-    suffixes.push('Carteles');
-  }
-
-  if (isCC) suffixes.push('CC');
-  if (isSDH) suffixes.push('SDH');
-  if (isForced) suffixes.push('Forzado');
-  if (isDubTitle) suffixes.push('Dub');
-
-  return suffixes;
-}
-
-function getDisplayTrackName(track) {
-  const languageName = getDisplayLanguage(track);
-
-  if (!languageName) {
-    return null;
-  }
-
-  // Only subtitles receive these descriptive suffixes.
-  if (track.type === 'subtitles') {
-    const suffixes = getSubtitleSuffix(track);
-
-    return suffixes.length
-      ? `${languageName} ${suffixes.join(' ')}`
-      : languageName;
-  }
-
-  // Audio tracks retain only the language name.
-  return languageName;
-}
-
-function getTrackLabel(track) {
-  const p = props(track);
-  const lang = p.language_ietf || p.language || 'und';
-  const name = p.track_name || '(unnamed)';
-  const flags = [];
-
-  if (p.default_track) {
-    flags.push('default');
-  }
-  if (p.forced_track) {
-    flags.push('forced');
-  }
-  if (p.hearing_impaired) {
-    flags.push('hearing-impaired');
-  }
-  if (p.visual_impaired) {
-    flags.push('visual-impaired');
-  }
-
-  return `ID ${track.id}: ${lang} | ${name}` +
-    (flags.length ? ` [${flags.join(', ')}]` : '');
-}
+/***********************************************************/
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
