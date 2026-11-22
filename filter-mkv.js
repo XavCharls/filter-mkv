@@ -166,8 +166,16 @@ function printTestVerification({
   defaultAudio,
   defaultSubtitle,
 }) {
-  console.log('\n--- Verification of output (TEST MODE - no file created) ---');
+  if (!CONFIG.verbose) {
+    const outputAudio = keptAudio.filter((t) => t.type === 'audio').map(e => printSimulatedTrack('', 0, e, null, false, false)).join();
+    const outputSubs = keptSubtitles.filter((t) => t.type === 'subtitles').map(e => printSimulatedTrack('', 0, e, null, false, false)).join();
+    console.log(
+      `Audios: ${outputAudio}; Subs: ${outputSubs};`
+    );
+    return;
+  }
 
+  console.log('\n--- Verification of output (TEST MODE - no file created) ---');
   let outputId = 0;
 
   // Video tracks
@@ -219,7 +227,8 @@ function printSimulatedTrack(
   outputId,
   track,
   defaultTrack,
-  isDefault
+  isDefault,
+  isPrinted = true
 ) {
   const p = track.properties || {};
 
@@ -242,8 +251,12 @@ function printSimulatedTrack(
     flags.push('default');
   }
 
-  let line =
-    `${type} ID ${outputId}: ${language} | ${name}`;
+  let line = '';
+  if (isPrinted) {
+    line = `${type} ID ${outputId}: ${language} | ${name}`;
+  } else {
+    line = `${language}|${name}`;
+  }
 
   if (flags.length > 0) {
     line += ` [${flags.join(', ')}]`;
@@ -253,7 +266,12 @@ function printSimulatedTrack(
     line += ' (DEFAULT)';
   }
 
-  console.log(line);
+  if (isPrinted) {
+    console.log(line);
+    return;
+  }
+
+  return line;
 }
 
 function run(command, args, options = {}) {
@@ -1021,7 +1039,7 @@ function main() {
     console.log('\nFinished successfully.');
     console.log(`Output: ${actualOutputPath}`);
     console.log(
-      `Tracks: ${outputAudio} audio; ${outputSubs} subtitles`
+      `Audios: ${outputAudio}; Subs: ${outputSubs};`
     );
   } else {
     console.log(
